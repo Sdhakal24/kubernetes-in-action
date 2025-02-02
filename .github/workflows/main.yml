@@ -1,45 +1,84 @@
-name: Deploy to ECR
-# updated ECR Repo week3-1 01/26
-on: 
+name: CI/CD Pipeline
+
+on:
   push:
-    branches: [ master ]
+    branches:
+      - main   
 
 jobs:
-  
-  build:
-    
-    name: Build Image
+  ci-cd-pipeline:
     runs-on: ubuntu-latest
 
-   
     steps:
+      # Step 1: Checkout Code
+      - name: Checkout Code
+        uses: actions/checkout@v3
 
-    - name: Check out code
-      uses: actions/checkout@v4
+      # Step 2: Configure AWS Credentials
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
 
-    - name: Login to Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v1
-      env:
-        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
-        AWS_REGION: us-east-1
+      # Step 3: Login to Amazon ECR
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
 
-    - name: Build, test, tag, and push image to Amazon ECR
-      env:
-        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        ECR_REPOSITORY: clo835-week3
-        IMAGE_TAG: v0.1
-      run: |
-        cd Chapter02/kubia/
-        ls -ltra
-        # Docker build command
-        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-        # Unit test
-        docker run -d -p 80:8080 --name nodeapp $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-        docker ps
-        echo "Pause for 10 seconds to let container start"
-        sleep 10
-        curl localhost -vvv
-        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+      # Step 4: Build, Test, Tag, and Push Flask App Image
+      - name: Build, Test, Tag, and Push Flask App Image to Amazon ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: flaskapp
+          IMAGE_TAG: latest
+        run: |
+          cd flaskapp
+          ls -ltra
+          # Docker build command
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          
+          # Unit test (basic HTTP check)
+          docker run -d -p 80:8080 --name flaskapp_test $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker ps
+          echo "Pause for 10 seconds to let Flask app start"
+          sleep 10
+          curl -I http://localhost:80
+          
+          # Clean up the test container
+          docker stop flaskapp_test
+          docker rm flaskapp_test
+
+          # Push to ECR
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+      # Step 5: Build, Test, Tag, and Push SQL Image
+      - name: Build, Test, Tag, and Push SQL Image to Amazon ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: sql
+          IMAGE_TAG: latest
+        run: |
+          cd sql
+          ls -ltra
+          # Docker build command
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+
+          # Unit test (check if SQL container starts properly)
+          docker run -d -p 3306:3306 --name sql_test $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker ps
+          echo "Pause for 10 seconds to let SQL container start"
+          sleep 10
+          
+          # Check if MySQL is running
+          docker logs sql_test
+
+          # Clean up the test container
+          docker stop sql_test
+          docker rm sql_test
+
+          # Push to ECR
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
